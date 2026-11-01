@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crop Prediction</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="topbar">
+    <div class="topbar-inner">
+        <a class="brand" href="{{ url_for('index') }}">Crop Recommendation System</a>
+
+        <nav class="nav">
+            <span class="user-pill">User ID: {{ session.get("user_id") }}</span>
+            <a href="{{ url_for('index') }}">Predict</a>
+            <a href="{{ url_for('history') }}">My Predictions</a>
+            <a href="{{ url_for('logout') }}">Logout</a>
+        </nav>
+    </div>
+</header>
+
+<div class="wrap">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+            <div class="alert {{ category }}">{{ message }}</div>
+        {% endfor %}
+    {% endwith %}
+
+    <div class="card">
+        <h1>Crop Recommendation System using Machine Learning</h1>
+        <p class="muted">
+            Enter soil values. Temperature, humidity and rainfall are detected automatically from your location.
+        </p>
+
+        <form method="POST">
+            <div class="grid">
+                <div>
+                    <label>Nitrogen</label>
+                    <input type="number" step="any" name="N" required value="{{ submitted.get('N', '') }}">
+                </div>
+
+                <div>
+                    <label>Phosphorus</label>
+                    <input type="number" step="any" name="P" required value="{{ submitted.get('P', '') }}">
+                </div>
+
+                <div>
+                    <label>Potassium</label>
+                    <input type="number" step="any" name="K" required value="{{ submitted.get('K', '') }}">
+                </div>
+
+                <div>
+                    <label>pH</label>
+                    <input type="number" step="any" name="ph" required value="{{ submitted.get('ph', '') }}">
+                </div>
+
+                <div class="weather-box">
+                    <strong>Automatic Weather Detection</strong>
+                    <div class="muted" style="margin-top:5px;">
+                        Allow browser location permission to fill these values.
+                    </div>
+
+                    <div class="grid" style="margin-top:15px;">
+                        <div>
+                            <label>Temperature</label>
+                            <input
+                                type="number"
+                                step="any"
+                                name="temperature"
+                                id="temperature"
+                                readonly
+                                required
+                                value="{{ submitted.get('temperature', '') }}"
+                            >
+                        </div>
+
+                        <div>
+                            <label>Humidity</label>
+                            <input
+                                type="number"
+                                step="any"
+                                name="humidity"
+                                id="humidity"
+                                readonly
+                                required
+                                value="{{ submitted.get('humidity', '') }}"
+                            >
+                        </div>
+
+                        <div>
+                            <label>Rainfall (last 365 days)</label>
+                            <input
+                                type="number"
+                                step="any"
+                                name="rainfall"
+                                id="rainfall"
+                                readonly
+                                required
+                                value="{{ submitted.get('rainfall', '') }}"
+                            >
+                        </div>
+
+                        <div class="actions" style="align-items:end;">
+                            <button
+                                type="button"
+                                class="btn btn-secondary full"
+                                onclick="detectWeather()"
+                            >
+                                Detect Location & Weather
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="weather-status" id="weatherStatus"></div>
+                </div>
+            </div>
+
+            <button type="submit" class="primary full" style="margin-top:22px;">
+                Predict Crop
+            </button>
+        </form>
+
+        {% if prediction %}
+        <div class="result">
+            <h2>Recommended Crop</h2>
+            <div class="crop">{{ prediction }}</div>
+            <p class="muted">
+                This prediction has been saved automatically to User ID:
+                {{ session.get("user_id") }}
+            </p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+async function detectWeather() {
+    const status = document.getElementById("weatherStatus");
+    const temperature = document.getElementById("temperature");
+    const humidity = document.getElementById("humidity");
+    const rainfall = document.getElementById("rainfall");
+
+    status.textContent = "Detecting your location and weather...";
+
+    if (!navigator.geolocation) {
+        status.textContent = "Location is not supported by this browser.";
+        return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+        async function(position) {
+            const lat = position.coords.latitude;
+            const lon = position.coords.longitude;
+
+            try {
+                const response = await fetch(
+                    `/get_weather?latitude=${encodeURIComponent(lat)}&longitude=${encodeURIComponent(lon)}`
+                );
+
+                const result = await response.json();
+
+                if (!response.ok || !result.success) {
+                    throw new Error(result.error || "Unable to get weather.");
+                }
+
+                temperature.value = result.temperature;
+                humidity.value = result.humidity;
+                rainfall.value = result.rainfall;
+
+                status.textContent =
+                    "Temperature, humidity and rainfall detected automatically.";
+            } catch (error) {
+                status.textContent =
+                    "Unable to get weather. Check internet connection and try again.";
+            }
+        },
+        function(error) {
+            if (error.code === 1) {
+                status.textContent =
+                    "Location permission is required. Click the button and allow location access.";
+            } else {
+                status.textContent =
+                    "Unable to detect location. Please try again.";
+            }
+        },
+        {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 0
+        }
+    );
+}
+
+window.addEventListener("load", detectWeather);
+</script>
+</body>
+</html>

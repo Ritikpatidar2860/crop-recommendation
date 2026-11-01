@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Predictions</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="topbar">
+    <div class="topbar-inner">
+        <a class="brand" href="{{ url_for('index') }}">Crop Recommendation System</a>
+
+        <nav class="nav">
+            <span class="user-pill">User ID: {{ session.get("user_id") }}</span>
+            <a href="{{ url_for('index') }}">Predict</a>
+            <a href="{{ url_for('history') }}">My Predictions</a>
+            <a href="{{ url_for('logout') }}">Logout</a>
+        </nav>
+    </div>
+</header>
+
+<div class="wrap">
+    <div class="card">
+        <div class="actions" style="justify-content:space-between;">
+            <div>
+                <h1>My Predictions</h1>
+                <p class="muted">
+                    All predictions saved under User ID: {{ session.get("user_id") }}
+                </p>
+            </div>
+
+            <a class="btn btn-primary" href="{{ url_for('index') }}">
+                New Prediction
+            </a>
+        </div>
+
+        <div class="info-row">
+            <div class="info-card">
+                <strong>User ID</strong>
+                {{ session.get("user_id") }}
+            </div>
+
+            <div class="info-card">
+                <strong>User Name</strong>
+                {{ session.get("full_name") }}
+            </div>
+
+            <div class="info-card">
+                <strong>Total Predictions</strong>
+                {{ predictions|length }}
+            </div>
+        </div>
+
+        {% if predictions %}
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date & Time</th>
+                        <th>Nitrogen</th>
+                        <th>Phosphorus</th>
+                        <th>Potassium</th>
+                        <th>Temperature</th>
+                        <th>Humidity</th>
+                        <th>pH</th>
+                        <th>Rainfall</th>
+                        <th>Predicted Crop</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                {% for row in predictions %}
+                    <tr>
+                        <td>{{ row["created_at"] }}</td>
+                        <td>{{ "%.2f"|format(row["nitrogen"]) }}</td>
+                        <td>{{ "%.2f"|format(row["phosphorus"]) }}</td>
+                        <td>{{ "%.2f"|format(row["potassium"]) }}</td>
+                        <td>{{ "%.2f"|format(row["temperature"]) }}</td>
+                        <td>{{ "%.2f"|format(row["humidity"]) }}</td>
+                        <td>{{ "%.2f"|format(row["ph"]) }}</td>
+                        <td>{{ "%.2f"|format(row["rainfall"]) }}</td>
+                        <td class="crop-cell">{{ row["predicted_crop"] }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty">
+            <h3>No predictions yet</h3>
+            <p>Make your first prediction and it will appear here automatically.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+</body>
+</html>
