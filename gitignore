@@ -1,0 +1,9 @@
+# config.ini me password ho sakta hai - GitHub par upload nahi hoga
+config.ini
+
+# Python ki temporary files
+__pycache__/
+*.pyc
+
+# Secret settings
+.env
