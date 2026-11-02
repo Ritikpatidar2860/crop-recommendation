@@ -135,6 +135,43 @@
 </div>
 
 <script>
+function isoDate(d) {
+    return d.toISOString().slice(0, 10);
+}
+
+async function fetchWeatherInBrowser(lat, lon) {
+    const cur = await fetch(
+        "https://api.open-meteo.com/v1/forecast?latitude=" + lat +
+        "&longitude=" + lon +
+        "&current=temperature_2m,relative_humidity_2m&timezone=auto"
+    );
+    if (!cur.ok) throw new Error("Weather service error " + cur.status);
+    const curJson = await cur.json();
+    const t = curJson.current && curJson.current.temperature_2m;
+    const h = curJson.current && curJson.current.relative_humidity_2m;
+    if (t == null || h == null) throw new Error("Weather data not available");
+
+    const end = new Date(); end.setDate(end.getDate() - 1);
+    const start = new Date(end); start.setDate(start.getDate() - 364);
+    const rain = await fetch(
+        "https://archive-api.open-meteo.com/v1/archive?latitude=" + lat +
+        "&longitude=" + lon +
+        "&start_date=" + isoDate(start) + "&end_date=" + isoDate(end) +
+        "&daily=rain_sum&timezone=auto"
+    );
+    if (!rain.ok) throw new Error("Rainfall service error " + rain.status);
+    const rainJson = await rain.json();
+    const vals = (rainJson.daily && rainJson.daily.rain_sum) || [];
+    const total = vals.reduce((a, v) => a + (Number(v) || 0), 0);
+
+    return {
+        temperature: Math.round(t * 100) / 100,
+        humidity: Math.round(h * 100) / 100,
+        rainfall: Math.round(total * 100) / 100
+    };
+}
+</script>
+<script>
 async function detectWeather() {
     const status = document.getElementById("weatherStatus");
     const temperature = document.getElementById("temperature");
@@ -154,14 +191,20 @@ async function detectWeather() {
             const lon = position.coords.longitude;
 
             try {
-                const response = await fetch(
-                    `/get_weather?latitude=${encodeURIComponent(lat)}&longitude=${encodeURIComponent(lon)}`
-                );
+                let result;
 
-                const result = await response.json();
-
-                if (!response.ok || !result.success) {
-                    throw new Error(result.error || "Unable to get weather.");
+                // Pehle seedha browser se Open-Meteo (user ki apni IP, rate-limit nahi)
+                try {
+                    result = await fetchWeatherInBrowser(lat, lon);
+                } catch (browserError) {
+                    // Fallback: server se
+                    const response = await fetch(
+                        `/get_weather?latitude=${encodeURIComponent(lat)}&longitude=${encodeURIComponent(lon)}`
+                    );
+                    result = await response.json();
+                    if (!response.ok || !result.success) {
+                        throw new Error(result.error || "Unable to get weather.");
+                    }
                 }
 
                 temperature.value = result.temperature;
@@ -172,7 +215,8 @@ async function detectWeather() {
                     "Temperature, humidity and rainfall detected automatically.";
             } catch (error) {
                 status.textContent =
-                    "Unable to get weather. Check internet connection and try again.";
+                    "Unable to get weather: " + (error.message || error) +
+                    " (Please try again in a minute.)";
             }
         },
         function(error) {
