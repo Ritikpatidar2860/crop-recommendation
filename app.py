@@ -1,15 +1,12 @@
 import os
-import sys
 import json
-import socket
-import configparser
 from datetime import date, timedelta
 from urllib.request import urlopen
 from urllib.parse import urlencode
 
 import pandas as pd
-import pymysql
-import pymysql.cursors
+import psycopg2
+import psycopg2.extras
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash
 from werkzeug.security import generate_password_hash, check_password_hash
 from sklearn.model_selection import train_test_split
@@ -19,155 +16,54 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, "Crop_recommendation.csv")
 
 # -----------------------------
-# Settings
-# Saari settings config.ini file me hain (DB port, DB password,
-# website ka port). Zarurat ho to wahin badlein, app.py nahi.
-# Environment variables (DB_HOST, DB_PORT, ...) config.ini se upar chalte hain.
+# Settings (environment variables - Render dashboard me set karein)
+#   DATABASE_URL : Neon ki connection string
+#   SECRET_KEY   : koi bhi lamba random text
 # -----------------------------
-_cfg = configparser.ConfigParser(interpolation=None)
-_cfg.read(os.path.join(BASE_DIR, "config.ini"), encoding="utf-8")
-
-
-def _setting(section, key, env_name, default):
-    value = os.environ.get(env_name)
-    if value is None or value == "":
-        value = _cfg.get(section, key, fallback=default)
-    return str(value).strip()
-
-
-# MySQL
-DB_HOST = _setting("database", "host", "DB_HOST", "127.0.0.1")
-DB_PORT = int(_setting("database", "port", "DB_PORT", "3306"))
-DB_USER = _setting("database", "user", "DB_USER", "root")
-DB_PASSWORD = _setting("database", "password", "DB_PASSWORD", "")
-DB_NAME = _setting("database", "name", "DB_NAME", "crop_recommendation")
-
-# Website (Flask)
-APP_HOST = _setting("server", "host", "APP_HOST", "127.0.0.1")
-APP_PORT = int(_setting("server", "port", "APP_PORT", "5000"))
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 app = Flask(__name__)
-app.secret_key = os.environ.get(
-    "SECRET_KEY",
-    "crop-recommendation-system-local-secret-key"
-)
+app.secret_key = os.environ.get("SECRET_KEY", "change-me-in-production")
 
 
 # -----------------------------
-# Database (MySQL)
+# Database (Neon PostgreSQL)
 # -----------------------------
 def get_db():
-    return pymysql.connect(
-        host=DB_HOST,
-        port=DB_PORT,
-        user=DB_USER,
-        password=DB_PASSWORD,
-        database=DB_NAME,
-        charset="utf8mb4",
-        cursorclass=pymysql.cursors.DictCursor,
-        autocommit=False
-    )
-
-
-def resolve_db_port():
-    """
-    MySQL ka sahi port dhoondhta hai.
-    Pehle config.ini wala port try hota hai, phir 3306/3307/3308/3309.
-    Jo port par MySQL mil jaye wahi use hota hai.
-    """
-    global DB_PORT
-
-    candidates = []
-    for port in (DB_PORT, 3306, 3307, 3308, 3309):
-        if port not in candidates:
-            candidates.append(port)
-
-    last_error = None
-    for port in candidates:
-        try:
-            conn = pymysql.connect(
-                host=DB_HOST,
-                port=port,
-                user=DB_USER,
-                password=DB_PASSWORD,
-                charset="utf8mb4",
-                connect_timeout=5
-            )
-            conn.close()
-        except pymysql.err.OperationalError as error:
-            code = error.args[0] if error.args else None
-            if code == 1045:
-                # Server mil gaya par username/password galat hai.
-                raise RuntimeError(
-                    f"MySQL port {port} par mil gaya, lekin username/password "
-                    f"galat hai.\nconfig.ini me [database] user aur password "
-                    f"sahi karein. (user = {DB_USER})"
-                )
-            last_error = error
-            continue
-
-        if port != DB_PORT:
-            print(f"[INFO] MySQL port {port} par mila "
-                  f"(config.ini me {DB_PORT} tha). Port {port} use ho raha hai.")
-            print(f"[TIP]  config.ini me port = {port} kar dein.")
-        DB_PORT = port
-        return port
-
-    raise RuntimeError(
-        "MySQL server se connect nahi ho paya "
-        f"(host={DB_HOST}, tried ports={candidates}).\n"
-        "1) MySQL server chalu hai ya nahi check karein "
-        "(XAMPP/MySQL Workbench/Services).\n"
-        "2) MySQL ka asli port config.ini me [database] port me likhein.\n"
-        f"Detail: {last_error}"
+    return psycopg2.connect(
+        DATABASE_URL,
+        cursor_factory=psycopg2.extras.RealDictCursor
     )
 
 
 def init_db():
-    resolve_db_port()
-
-    # Database na ho to pehle bana do.
-    server = pymysql.connect(
-        host=DB_HOST,
-        port=DB_PORT,
-        user=DB_USER,
-        password=DB_PASSWORD,
-        charset="utf8mb4"
-    )
-    with server.cursor() as cur:
-        cur.execute(
-            f"CREATE DATABASE IF NOT EXISTS `{DB_NAME}` "
-            "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
-        )
-    server.commit()
-    server.close()
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL environment variable set nahi hai.")
 
     conn = get_db()
     with conn.cursor() as cur:
         cur.execute("""
             CREATE TABLE IF NOT EXISTS users (
-                id INT AUTO_INCREMENT PRIMARY KEY,
+                id SERIAL PRIMARY KEY,
                 full_name VARCHAR(150) NOT NULL,
                 email VARCHAR(255) NOT NULL UNIQUE,
                 password_hash VARCHAR(255) NOT NULL,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """)
-
         cur.execute("""
             CREATE TABLE IF NOT EXISTS predictions (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                user_id INT NOT NULL,
-                nitrogen DOUBLE NOT NULL,
-                phosphorus DOUBLE NOT NULL,
-                potassium DOUBLE NOT NULL,
-                temperature DOUBLE NOT NULL,
-                humidity DOUBLE NOT NULL,
-                ph DOUBLE NOT NULL,
-                rainfall DOUBLE NOT NULL,
+                id SERIAL PRIMARY KEY,
+                user_id INT NOT NULL REFERENCES users(id),
+                nitrogen DOUBLE PRECISION NOT NULL,
+                phosphorus DOUBLE PRECISION NOT NULL,
+                potassium DOUBLE PRECISION NOT NULL,
+                temperature DOUBLE PRECISION NOT NULL,
+                humidity DOUBLE PRECISION NOT NULL,
+                ph DOUBLE PRECISION NOT NULL,
+                rainfall DOUBLE PRECISION NOT NULL,
                 predicted_crop VARCHAR(100) NOT NULL,
-                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users(id)
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """)
     conn.commit()
@@ -248,10 +144,11 @@ def signup():
                     """
                     INSERT INTO users (full_name, email, password_hash)
                     VALUES (%s, %s, %s)
+                    RETURNING id
                     """,
                     (full_name, email, generate_password_hash(password))
                 )
-                user_id = cur.lastrowid
+                user_id = cur.fetchone()["id"]
             conn.commit()
 
             session.clear()
@@ -265,7 +162,8 @@ def signup():
             )
             return redirect(url_for("index"))
 
-        except pymysql.err.IntegrityError:
+        except psycopg2.IntegrityError:
+            conn.rollback()
             flash("This email is already registered. Please log in.", "error")
             return render_template("signup.html")
 
@@ -506,34 +404,9 @@ def get_weather():
         }), 500
 
 
-def find_free_port(host, preferred, tries=50):
-    """Preferred port busy ho to agla khaali port dhoondh leta hai."""
-    for port in range(preferred, preferred + tries):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            try:
-                sock.bind((host, port))
-                return port
-            except OSError:
-                continue
-    raise RuntimeError(f"Port {preferred} ke baad koi khaali port nahi mila.")
-
-
-# Create the database automatically when the app starts.
-try:
-    init_db()
-except RuntimeError as error:
-    print("\n[ERROR] " + str(error) + "\n")
-    sys.exit(1)
+# Tables app start hote hi automatically ban jati hain.
+init_db()
 
 if __name__ == "__main__":
-    port = find_free_port(APP_HOST, APP_PORT)
-    if port != APP_PORT:
-        print(f"[INFO] Port {APP_PORT} busy hai, isliye port {port} use ho raha hai.")
-
-    print("\n==============================================")
-    print(f" Browser me kholein: http://127.0.0.1:{port}")
-    print(f" MySQL: {DB_HOST}:{DB_PORT}  (database: {DB_NAME})")
-    print("==============================================\n")
-
-    # use_reloader=False: debug mode me app do baar start hone se bachata hai.
-    app.run(host=APP_HOST, port=port, debug=True, use_reloader=False)
+    # Sirf local testing ke liye. Render par gunicorn chalta hai.
+    app.run(host="127.0.0.1", port=5000, debug=False)
