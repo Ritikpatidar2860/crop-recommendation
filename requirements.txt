@@ -1,6 +1,6 @@
-Flask
-pandas
-scikit-learn
-Werkzeug
-PyMySQL
-cryptography
+   Flask
+   pandas
+   scikit-learn
+   Werkzeug
+   psycopg2-binary
+   gunicorn
